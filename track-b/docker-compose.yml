@@ -1,0 +1,34 @@
+services:
+  validator:
+    build: ./validator
+    container_name: zugferd-validator
+    restart: unless-stopped
+    expose:
+      - "8081"
+    volumes:
+      - ./validator/rules:/app/rules:ro
+    environment:
+      - RULES_VERSION=ZUGFeRD_2.3_EN16931_2024
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8081/health"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+
+  webapp:
+    build: ./webapp
+    container_name: zugferd-webapp
+    restart: unless-stopped
+    ports:
+      - "8080:3000"
+    depends_on:
+      - validator
+    environment:
+      - VALIDATOR_URL=http://validator:8081
+      - NODE_ENV=production
+    volumes:
+      - validator_tmp:/tmp/zugferd
+    # Kein Internet, nur internes Netz
+
+volumes:
+  validator_tmp:

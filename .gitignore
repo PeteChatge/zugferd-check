@@ -1,0 +1,15 @@
+# Python
+__pycache__/
+*.py[cod]
+
+# Node (nur für lokale JS-Tests)
+node_modules/
+
+# Quarantäne-Ausgaben der Prüftools (entstehen lazy bei ROT, nie committen)
+fehler/
+**/fehler/
+
+# OS / Editor
+.DS_Store
+Thumbs.db
+*~

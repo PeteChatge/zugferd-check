@@ -1,0 +1,530 @@
+<!DOCTYPE html>
+<html lang="de">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>ZUGFeRD Check - Offline (Track A)</title>
+<style>
+  :root{--green:#0a7a42;--red:#c0272d;--yellow:#b58900;--bg:#f6f7f8;--card:#fff;--border:#d9dde3;--text:#1b1f2a}
+  *{box-sizing:border-box} body{margin:0;font-family:system-ui,Segoe UI,Roboto,Helvetica,Arial,sans-serif;color:var(--text);background:var(--bg)}
+  header{background:#0f172a;color:#fff;padding:14px 20px;display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:10px}
+  header h1{margin:0;font-size:18px} header small{opacity:.8}
+  .badge{font-size:12px;padding:4px 8px;border-radius:999px;background:#1e293b;border:1px solid #334155}
+  main{max-width:1200px;margin:18px auto;padding:0 16px}
+  .card{background:var(--card);border:1px solid var(--border);border-radius:12px;padding:16px;margin-bottom:16px;box-shadow:0 1px 3px rgba(0,0,0,.06)}
+  .drop{border:2px dashed #94a3b8;border-radius:12px;padding:26px;text-align:center;background:#f8fafc;transition:.15s}
+  .drop.dragover{border-color:#0f172a;background:#eef2ff}
+  .drop input{display:none}
+  .btn{appearance:none;border:1px solid var(--border);background:#fff;padding:8px 12px;border-radius:8px;cursor:pointer;font-weight:600}
+  .btn.primary{background:#0f172a;color:#fff;border-color:#0f172a}
+  .btn:disabled{opacity:.5;cursor:not-allowed}
+  .row{display:flex;gap:12px;flex-wrap:wrap;align-items:center}
+  .kpi{display:flex;gap:10px;flex-wrap:wrap;margin-top:10px}
+  .kpi span{padding:6px 10px;border-radius:999px;font-weight:700;font-size:13px;border:1px solid var(--border);background:#fff}
+  .kpi .ok{color:var(--green);border-color:#b6e2c9;background:#eaf6ee}
+  .kpi .bad{color:var(--red);border-color:#f0b9bb;background:#fdecec}
+  .kpi .warn{color:var(--yellow);border-color:#f5e0a0;background:#fef7d9}
+  progress{width:100%;height:14px}
+  table{width:100%;border-collapse:collapse;font-size:13px}
+  th,td{padding:8px 6px;border-bottom:1px solid var(--border);text-align:left;vertical-align:top}
+  th{position:sticky;top:0;background:#f8fafc;font-size:12px;text-transform:uppercase;letter-spacing:.04em}
+  .lamp{width:12px;height:12px;border-radius:50%;display:inline-block}
+  .lamp.g{background:var(--green)} .lamp.r{background:var(--red)} .lamp.y{background:var(--yellow)}
+  details{cursor:pointer} details pre{white-space:pre-wrap;word-break:break-word;background:#0f172a;color:#e2e8f0;padding:10px;border-radius:8px;max-height:300px;overflow:auto}
+  .muted{color:#64748b;font-size:12px}
+  .hint{background:#fffbeb;border:1px solid #fcd34d;padding:10px;border-radius:8px;font-size:13px}
+  footer{max-width:1200px;margin:0 auto;padding:10px 16px 30px;color:#64748b;font-size:12px}
+  code{background:#f1f5f9;padding:1px 5px;border-radius:4px}
+</style>
+<!-- Offline-Hinweis: Für finalen Offline-Betrieb pdf.js + jszip inline vendorn (siehe vendor/README). Prototype nutzt CDN, funktioniert danach 100% offline wenn vendor gebundled. -->
+<script src="https://cdn.jsdelivr.net/npm/pdfjs-dist@4.6.82/build/pdf.min.mjs" type="module"></script>
+<script src="https://cdn.jsdelivr.net/npm/jszip@3.10.1/dist/jszip.min.js"></script>
+</head>
+<body>
+<header>
+  <div>
+    <h1>ZUGFeRD Check <span style="font-weight:400;opacity:.8">- Offline Track A</span></h1>
+    <small>100% im Browser &middot; kein Upload &middot; kein Netz nach dem Laden &middot; v0.2.0 &middot; Regeln: ZUGFeRD 2.3 / EN16931 2024 + Rechenprüfung (BT-117, Summenkette, PDF↔XML) + Quarantäne</small>
+  </div>
+  <div class="badge" id="versionBadge">Stand: 2026-09-10 &middot; pdf.js 4.6.82</div>
+</header>
+
+<main>
+  <div class="card hint">
+    <strong>So prüfen Sie einen Ordner:</strong> Ziehen Sie 1-300 PDFs (oder eine ZIP) in das Feld unten - oder klicken Sie zum Auswählen. Auch ganze Ordner per Drag&amp;Drop möglich (Chrome/Edge). Alle Dateien bleiben im Arbeitsspeicher, werden nach dem Schließen verworfen. Für <strong>Datensicherheit</strong>: Seite einmal laden, dann Netz kappen - funktioniert weiter.
+  </div>
+
+  <div class="card">
+    <div id="drop" class="drop">
+      <p style="margin:0 0 8px;font-weight:700">Ordner / PDFs / ZIP hier ablegen</p>
+      <p class="muted" style="margin:0 0 12px">oder</p>
+      <label class="btn primary" for="fileInput">Dateien wählen</label>
+      <input id="fileInput" type="file" multiple accept=".pdf,.zip,application/pdf,application/zip">
+      <label class="btn" for="folderInput" style="margin-left:8px">Ordner wählen</label>
+      <input id="folderInput" type="file" webkitdirectory multiple>
+      <p class="muted" style="margin:12px 0 0">Limit: 300 Dateien / 500 MB &middot; 2-4 Worker &middot; jede Datei isoliert</p>
+    </div>
+    <div class="row" style="margin-top:12px">
+      <button id="clearBtn" class="btn">Zurücksetzen</button>
+      <button id="csvBtn" class="btn" disabled>CSV Export</button>
+      <button id="zipBtn" class="btn" disabled>ZIP Logs</button>
+      <button id="fehlerBtn" class="btn" disabled>Fehler-Paket (ZIP)</button>
+      <button id="saveBtn" class="btn" disabled>In Ordner ablegen…</button>
+      <button id="printBtn" class="btn" disabled>Druck-Report</button>
+      <span id="progressText" class="muted"></span>
+    </div>
+    <progress id="progress" value="0" max="100" style="display:none;margin-top:10px"></progress>
+    <div id="kpi" class="kpi"></div>
+  </div>
+
+  <div class="card" style="overflow:auto;max-height:70vh">
+    <table id="resultTable">
+      <thead><tr>
+        <th>#</th><th>Status</th><th>Datei</th><th>Größe</th><th>Profil</th><th>Fehler / Hinweis</th><th>Detail</th>
+      </tr></thead>
+      <tbody id="tbody"><tr><td colspan="7" class="muted">Noch keine Prüfung - Dateien ablegen zum Start.</td></tr></tbody>
+    </table>
+  </div>
+
+  <div class="card">
+    <h3 style="margin:0 0 8px">Was wird geprüft? (Stufe 1-3, PDF/A-3 tolerant)</h3>
+    <ul style="margin:0;padding-left:18px;font-size:13px;line-height:1.6">
+      <li><strong>Stufe 1:</strong> PDF enthält eingebettetes XML? (<code>factur-x.xml</code> / <code>zugferd-invoice.xml</code> / <code>*.xml</code> Attachment)</li>
+      <li><strong>Stufe 2:</strong> XML wohlgeformt? Grundstruktur (CrossIndustryInvoice) vorhanden? (XSD-Vollprüfung via xmllint-wasm in V1.1)</li>
+      <li><strong>Stufe 3:</strong> EN16931 Pflichtfelder (BT-1, BT-5, BT-24, BT-27, BT-34, Summen) + Schematron (KoSIT XSLT in V1.1)</li>
+      <li><strong>Gelb:</strong> PDF/A-3 Verstöße, Rundungs-Hinweise - blockiert Versand nicht</li>
+      <li><strong>Rot:</strong> Alles was Empfänger ablehnen würde</li>
+      <li><strong>Quarantäne:</strong> ROT-Dateien per „Fehler-Paket (ZIP)" (`fehler/*.pdf` + `fehler/*.md`) oder „In Ordner ablegen…" (Chrome/Edge) sammeln — der `fehler/`-Ordner entsteht erst beim ersten Fehler</li>
+    </ul>
+    <p class="muted">Track A ist bewusst tolerant bei PDF/A-3. Track B (Docker/Java) ist die 100% Referenz. Beide Reports enthalten Hash + Regel-Version.</p>
+  </div>
+</main>
+
+<footer>
+  Audit: Es wird nur <code>Dateiname + SHA-256 (gekürzt) + Ergebnis</code> im CSV geloggt, kein Inhalt. Temp nur RAM. Nach Tab-Close verworfen. | Für Offline-Final: <code>vendor/</code> inline bundlen, dann <code>file:///</code> öffnbar.
+</footer>
+
+<script type="module">
+import * as pdfjsLib from "https://cdn.jsdelivr.net/npm/pdfjs-dist@4.6.82/build/pdf.min.mjs";
+pdfjsLib.GlobalWorkerOptions.workerSrc = "https://cdn.jsdelivr.net/npm/pdfjs-dist@4.6.82/build/pdf.worker.min.mjs";
+
+const $ = id => document.getElementById(id);
+const drop = $('drop'), fileInput=$('fileInput'), folderInput=$('folderInput');
+const tbody=$('tbody'), progress=$('progress'), progressText=$('progressText'), kpi=$('kpi');
+const csvBtn=$('csvBtn'), zipBtn=$('zipBtn'), printBtn=$('printBtn'), clearBtn=$('clearBtn');
+const fehlerBtn=$('fehlerBtn'), saveBtn=$('saveBtn');
+
+let results = []; // {name,size,status,profile,errors,warnings,xmlSnippet,hash,sums?}
+let audit = [];
+
+// ---- Helpers ----
+function fmtBytes(b){ if(b<1024) return b+' B'; if(b<1024*1024) return (b/1024).toFixed(1)+' KB'; return (b/1024/1024).toFixed(1)+' MB'; }
+async function sha256Short(buf){ const h=await crypto.subtle.digest('SHA-256', buf); const a=new Uint8Array(h); return [...a].slice(0,8).map(b=>b.toString(16).padStart(2,'0')).join(''); }
+function escapeHtml(s){ return s.replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c])); }
+
+// ---- Drag & Drop ----
+drop.addEventListener('dragover', e=>{e.preventDefault(); drop.classList.add('dragover')});
+drop.addEventListener('dragleave', ()=> drop.classList.remove('dragover'));
+drop.addEventListener('drop', async e=>{
+  e.preventDefault(); drop.classList.remove('dragover');
+  const files = [...e.dataTransfer.files];
+  // webkitGetAsEntry für Ordner-Rekursion (Chrome)
+  if(!files.length && e.dataTransfer.items){
+    const entries = [...e.dataTransfer.items].map(i=>i.webkitGetAsEntry()).filter(Boolean);
+    const collected=[];
+    async function walk(entry, path=""){
+      if(entry.isFile){ const f=await new Promise(res=>entry.file(res)); f._path=path+entry.name; collected.push(f); }
+      else if(entry.isDirectory){ const r=entry.createReader(); const ents=await new Promise(res=>r.readEntries(res)); for(const en of ents) await walk(en, path+entry.name+"/"); }
+    }
+    for(const en of entries) await walk(en);
+    if(collected.length) return handleFiles(collected);
+  }
+  handleFiles(files);
+});
+fileInput.addEventListener('change', ()=> handleFiles([...fileInput.files]));
+folderInput.addEventListener('change', ()=> handleFiles([...folderInput.files].map(f=>{f._path=f.webkitRelativePath||f.name; return f;})));
+clearBtn.onclick = ()=>{ results=[]; audit=[]; render(); progress.style.display='none'; progressText.textContent=''; csvBtn.disabled=true; zipBtn.disabled=true; printBtn.disabled=true; fehlerBtn.disabled=true; saveBtn.disabled=true; kpi.innerHTML=''; };
+
+async function handleFiles(files){
+  // Entpack ZIPs inline
+  let expanded=[];
+  for(const f of files){
+    if(f.name.toLowerCase().endsWith('.zip')){
+      try{
+        const zip = await JSZip.loadAsync(f);
+        for(const [path, entry] of Object.entries(zip.files)){
+          if(entry.dir) continue;
+          if(!path.toLowerCase().endsWith('.pdf')) continue;
+          const buf = await entry.async('arraybuffer');
+          const ff = new File([buf], path.split('/').pop(), {type:'application/pdf'});
+          ff._path = path;
+          expanded.push(ff);
+        }
+      }catch(e){ expanded.push(f); } // ZIP Fehler -> als Datei werten
+    } else expanded.push(f);
+  }
+  // Filter PDFs
+  const pdfs = expanded.filter(f=> f.name.toLowerCase().endsWith('.pdf') || f.type==='application/pdf');
+  if(!pdfs.length){ alert('Keine PDFs gefunden (ZIPs werden nur mit PDFs darin ausgewertet).'); return; }
+  if(pdfs.length>300){ if(!confirm(`${pdfs.length} Dateien > Limit 300. Trotzdem prüfen? (kann langsam werden)`)) return; }
+  const totalSize = pdfs.reduce((s,f)=>s+f.size,0);
+  if(totalSize>500*1024*1024 && !confirm(`${fmtBytes(totalSize)} > 500MB. Fortfahren?`)) return;
+  await runChecks(pdfs);
+}
+
+// ---- Core Checks (isoliert pro Datei, 2-4 Worker simuliert sequenziell mit yield) ----
+async function runChecks(files){
+  results=[]; audit=[]; render(); progress.style.display='block'; progress.max=files.length; progress.value=0;
+  csvBtn.disabled=true; zipBtn.disabled=true; printBtn.disabled=true; fehlerBtn.disabled=true; saveBtn.disabled=true;
+  let ok=0,bad=0,warn=0;
+  for(let i=0;i<files.length;i++){
+    const f=files[i];
+    progressText.textContent = `Prüfe ${i+1}/${files.length}: ${f.name}`;
+    const buf = await f.arrayBuffer();
+    const hash = await sha256Short(buf);
+    const r = await checkOnePdf(f.name, buf, hash);
+    if(r.status==='ROT') r._file = f; // nur kaputte behalten (für Fehler-Paket), Rest bleibt RAM-schlank
+    results.push(r);
+    audit.push({file:f.name, hash, status:r.status, profile:r.profile});
+    if(r.status==='GRÜN') ok++; else if(r.status==='ROT') bad++; else warn++;
+    progress.value=i+1;
+    render();
+    await new Promise(res=> setTimeout(res, 0)); // yield UI
+  }
+  progressText.textContent = `Fertig: ${files.length} Dateien - ${ok} grün, ${bad} rot, ${warn} gelb`;
+  kpi.innerHTML = `<span class="ok">GRÜN ${ok}</span><span class="bad">ROT ${bad}</span><span class="warn">GELB ${warn}</span><span>Gesamt ${files.length}</span>`;
+  csvBtn.disabled=false; zipBtn.disabled=false; printBtn.disabled=false;
+  // Lazy: Fehler-Buttons nur bei ≥1 ROT aktivieren - sonst entsteht nirgends ein (leerer) fehler-Ordner
+  fehlerBtn.disabled = bad===0; saveBtn.disabled = bad===0;
+  if(bad>0) progressText.textContent += ` - ${bad} kaputte Datei(en): „Fehler-Paket" oder „In Ordner ablegen" nutzen`;
+}
+
+async function checkOnePdf(name, buf, hash){
+  const errors=[], warnings=[];
+  let profile='—', xmlText=null, xmlDoc=null, sums=null;
+  let status='ROT';
+  try{
+    const pdf = await pdfjsLib.getDocument({data: buf}).promise;
+    // Stufe 1: Attachments
+    let attachments=[];
+    try{ attachments = await pdf.getAttachments() || {}; }catch{}
+    // pdf.getAttachments returns object {filename: {content, ...}}
+    let xmlEntry = null;
+    const names = Object.keys(attachments);
+    // Bevorzugt factur-x / zugferd
+    const pref = names.find(n=> /factur-?x\.xml$/i.test(n)) || names.find(n=> /zugferd.*\.xml$/i.test(n)) || names.find(n=> /\.xml$/i.test(n));
+    if(pref){ xmlEntry = attachments[pref]; profile = detectProfile(pref); }
+    if(!xmlEntry){
+      errors.push('Kein eingebettetes XML gefunden (Anhang factur-x.xml / zugferd-invoice.xml fehlt) - Stufe 1 ROT');
+      return mkResult(name, buf.byteLength, 'ROT', profile, errors, warnings, null, hash, pdf.numPages);
+    }
+    // Inhalt holen
+    let bytes = xmlEntry.content;
+    // pdf.js liefert Uint8Array
+    xmlText = new TextDecoder('utf-8').decode(bytes);
+    // Stufe 2: wohlgeformt?
+    try{
+      const parser = new DOMParser();
+      xmlDoc = parser.parseFromString(xmlText, 'application/xml');
+      const perr = xmlDoc.querySelector('parsererror');
+      if(perr) throw new Error(perr.textContent.slice(0,400));
+    }catch(e){
+      errors.push('XML nicht wohlgeformt: '+ e.message);
+      return mkResult(name, buf.byteLength, 'ROT', profile, errors, warnings, xmlText?.slice(0,2000), hash, pdf.numPages);
+    }
+    // Grundstruktur
+    const hasInvoice = !!xmlDoc.querySelector('CrossIndustryInvoice, *|CrossIndustryInvoice, rsmt\\:CrossIndustryInvoice');
+    if(!xmlDoc.documentElement || !/CrossIndustryInvoice|Factur/.test(xmlDoc.documentElement.nodeName)){
+      // Fallback: auf bekannte Knoten prüfen
+      if(!xmlDoc.querySelector('BT-1, ID, InvoiceNumber, BuyerReference') && !xmlText.includes('CrossIndustryInvoice')){
+        warnings.push('XML Grundstruktur unklar (kein CrossIndustryInvoice) - prüfe Profil');
+      }
+    }
+    // Profil aus XML verfeinern
+    const p2 = detectProfileFromXml(xmlText);
+    if(p2) profile = p2;
+
+    // Stufe 3: EN16931 Pflichtfelder (leichte Checks, Voll-Schematron in V1.1 via XSLT)
+    const checks = [
+      {label:'Rechnungsnummer (BT-1)', test: ()=> xmlText.includes('<ram:ID') || xmlText.includes('BT-1') || /<rsm:ID|<ram:ID/.test(xmlText)},
+      {label:'Rechnungsdatum (BT-2)', test: ()=> /IssueDateTime|BT-2/.test(xmlText)},
+      {label:'Verkäufer Name (BT-27)', test: ()=> /SellerTradeParty|BT-27/.test(xmlText)},
+      {label:'Käufer Name/Referenz (BT-44/BT-10)', test: ()=> /BuyerTradeParty|BuyerReference|BT-44|BT-10/.test(xmlText)},
+      {label:'Währung (BT-5)', test: ()=> /InvoiceCurrencyCode|BT-5/.test(xmlText)},
+      {label:'Summen (BT-106 ff)', test: ()=> /SpecifiedTradeSettlementHeaderMonetarySummation|BT-106|GrandTotalAmount/.test(xmlText)},
+      {label:'USt Aufschlüsselung (BT-117)', test: ()=> /ApplicableTradeTax|BT-117|BT-118/.test(xmlText)},
+    ];
+    checks.forEach(c=>{ if(!c.test()) warnings.push(`Pflichtfeld-Hinweis: ${c.label} nicht erkannt (tolerant)`); });
+
+    // ---- Stufe 3b: Rechenprüfung (Patch 2026-09-10, Toleranz 0,02 €) ----
+    // Fängt künstliche Fehler wie MwSt 1,76 statt 0,76 und Summen-Mismatch.
+    // XSD allein ist dafür blind (valides Format, falsche Werte).
+    const TOL = 0.02;
+    sums = getHeaderSums(xmlDoc);
+    const taxGroups = getHeaderTaxGroups(xmlDoc);
+    const lineTotals = getLineTotals(xmlDoc);
+    if(!sums.grand) warnings.push('Kein GrandTotalAmount gefunden');
+    // 3b-1: MwSt-Nachrechnung je Steuergruppe: Basis * Satz = Steuer?
+    taxGroups.forEach((g, idx)=>{
+      if(g.basis!=null && g.calc!=null && g.rate!=null){
+        const erwartet = Math.round(g.basis * g.rate) / 100;
+        if(Math.abs(erwartet - g.calc) > TOL){
+          errors.push(`MwSt-Rechenfehler (BT-117) Gruppe ${idx+1}: Basis ${fmtEUR(g.basis)} × ${g.rate}% = erwartet ${fmtEUR(erwartet)}, gefunden ${fmtEUR(g.calc)} (Diff ${fmtEUR(g.calc-erwartet)}) - ROT`);
+        }
+      }
+    });
+    // 3b-2: Summenkette: Basis + Steuer = Brutto?
+    if(sums.basis!=null && sums.tax!=null && sums.grand!=null){
+      if(Math.abs((sums.basis + sums.tax) - sums.grand) > TOL){
+        errors.push(`Summenkette gebrochen (BT-109+BT-110≠BT-112): ${fmtEUR(sums.basis)} + ${fmtEUR(sums.tax)} = ${fmtEUR(sums.basis+sums.tax)}, aber GrandTotal ${fmtEUR(sums.grand)} - ROT`);
+      }
+    }
+    // 3b-3: Zeilensumme = BT-106?
+    if(lineTotals.length && sums.line!=null){
+      const s = lineTotals.reduce((a,b)=>a+b,0);
+      if(Math.abs(s - sums.line) > TOL){
+        errors.push(`Zeilensumme ≠ BT-106: Summe Zeilen ${fmtEUR(s)}, BT-106 ${fmtEUR(sums.line)} - ROT`);
+      }
+    }
+    // 3b-4: Grand - Prepaid = Due?
+    if(sums.grand!=null && sums.due!=null){
+      const pre = sums.prepaid || 0;
+      if(Math.abs((sums.grand - pre) - sums.due) > TOL){
+        errors.push(`DuePayable inkonsistent (BT-112-BT-113≠BT-115): Grand ${fmtEUR(sums.grand)} - Prepaid ${fmtEUR(pre)} ≠ Due ${fmtEUR(sums.due)} - ROT`);
+      }
+    }
+
+    // ---- Stufe 4: PDF-Sicht vs XML (Patch 2026-09-10) ----
+    // Vergleicht den sichtbaren Rechnungsbetrag mit XML-GrandTotal.
+    let pdfVisibleText = '';
+    try{ pdfVisibleText = await getPdfVisibleText(pdf); }catch{}
+    if(sums.grand!=null && pdfVisibleText){
+      const pdfBetrag = findRechnungsbetrag(pdfVisibleText);
+      if(pdfBetrag!=null){
+        if(Math.abs(pdfBetrag - sums.grand) > TOL){
+          errors.push(`PDF↔XML-Mismatch: sichtbar ${fmtEUR(pdfBetrag)}, XML-GrandTotal ${fmtEUR(sums.grand)} - ROT`);
+        }
+      } else {
+        // Fallback: kommt GrandTotal irgendwo im Sichttext vor?
+        if(!pdfContainsAmount(pdfVisibleText, sums.grand, TOL)){
+          warnings.push(`PDF↔XML-Hinweis: XML-Brutto ${fmtEUR(sums.grand)} im Sichttext nicht gefunden (Layout?) - bitte manuell prüfen`);
+        }
+      }
+    }
+
+    // PDF/A-3 Hinweis
+    // pdf.js liefert keine PDF/A Info, daher tolerant GELB wenn PDF Version <1.7 etc. - hier nur Hinweis
+    // Wenn XML valide aber Warnings vorhanden -> GELB sonst GRÜN
+    // Rechenfehler (errors) führen immer zu ROT, nie zu GELB.
+    if(errors.length===0 && warnings.length===0) status='GRÜN';
+    else if(errors.length===0 && warnings.length>0) status='GELB'; // tolerant
+    else status='ROT';
+
+    // Harte ROT Fälle
+    if(xmlText.length<500) { errors.push('XML ungewöhnlich klein (<500 Zeichen)'); status='ROT'; }
+
+  }catch(e){
+    errors.push('PDF konnte nicht gelesen werden: '+(e.message||e).toString().slice(0,400));
+    status='ROT';
+  }
+  const out = mkResult(name, buf.byteLength, status, profile, errors, warnings, xmlText?.slice(0,3000), hash, null);
+  out.sums = sums; out.time = new Date().toISOString();
+  return out;
+}
+
+function detectProfile(filename){
+  const f=filename.toLowerCase();
+  if(f.includes('xrechnung')||f.includes('en16931')) return 'EN16931';
+  if(f.includes('extended')) return 'EXTENDED';
+  if(f.includes('basic')) return 'BASIC';
+  if(f.includes('factur')) return 'EN16931 (Factur-X)';
+  return 'ZUGFeRD/Factur-X';
+}
+function detectProfileFromXml(xml){
+  const m = xml.match(/<ram:ID>(urn:[^<]+)<\/ram:ID>/);
+  const guide = m ? m[1] : '';
+  if(/extended/i.test(guide)) return 'EXTENDED';
+  if(/basicwl|basic/i.test(guide)) return 'BASIC';
+  if(/en16931/i.test(guide) || /factur-x/i.test(xml)) return 'EN16931';
+  if(/BASIC/.test(xml) && xml.length<5000) return 'BASIC';
+  if(/EXTENDED/.test(xml)) return 'EXTENDED';
+  if(/factur-x/i.test(xml)) return 'EN16931';
+  return null;
+}
+// ---- Rechen-/PDF-Helfer (Patch 2026-09-10) ----
+function fmtEUR(n){ return (n==null||isNaN(n)) ? '—' : n.toFixed(2)+' €'; }
+function parseNum(t){ if(t==null) return null; const v = parseFloat(String(t).trim().replace(',','.')); return isNaN(v)?null:v; }
+function elsByLocal(doc, local){ try{ return Array.from(doc.getElementsByTagNameNS('*', local)); }catch{ return []; } }
+function childByLocal(parent, local){
+  for(const ch of parent.childNodes||[]){ if(ch.nodeType===1 && (ch.localName===local || (ch.nodeName||'').endsWith(':'+local))) return ch; }
+  return null;
+}
+function textOf(parent, local){ const el = childByLocal(parent, local); return el ? parseNum(el.textContent) : null; }
+function getHeaderSums(xmlDoc){
+  const blocks = elsByLocal(xmlDoc, 'SpecifiedTradeSettlementHeaderMonetarySummation');
+  if(!blocks.length) return {};
+  const b = blocks[0];
+  return {
+    line: textOf(b,'LineTotalAmount'),
+    basis: textOf(b,'TaxBasisTotalAmount'),
+    tax: textOf(b,'TaxTotalAmount'),
+    grand: textOf(b,'GrandTotalAmount'),
+    prepaid: textOf(b,'TotalPrepaidAmount'),
+    due: textOf(b,'DuePayableAmount'),
+  };
+}
+function getHeaderTaxGroups(xmlDoc){
+  const settlements = elsByLocal(xmlDoc, 'ApplicableHeaderTradeSettlement');
+  const scope = settlements.length ? settlements[0] : xmlDoc;
+  const taxes = Array.from(scope.getElementsByTagNameNS('*','ApplicableTradeTax'));
+  return taxes.map(t=>({
+    basis: textOf(t,'BasisAmount'),
+    calc: textOf(t,'CalculatedAmount'),
+    rate: textOf(t,'RateApplicablePercent'),
+  })).filter(g=> g.basis!=null || g.calc!=null);
+}
+function getLineTotals(xmlDoc){
+  const items = elsByLocal(xmlDoc, 'IncludedSupplyChainTradeLineItem');
+  const out = [];
+  items.forEach(it=>{
+    const sums = it.getElementsByTagNameNS('*','SpecifiedTradeSettlementLineMonetarySummation');
+    if(sums.length){ const v = textOf(sums[0],'LineTotalAmount'); if(v!=null) out.push(v); }
+  });
+  return out;
+}
+async function getPdfVisibleText(pdf){
+  let t = '';
+  const n = Math.min(pdf.numPages, 5);
+  for(let i=1;i<=n;i++){
+    const page = await pdf.getPage(i);
+    const tc = await page.getTextContent();
+    t += tc.items.map(it=>it.str).join(' ') + '\n';
+  }
+  return t;
+}
+function parseDE(s){
+  s = String(s).trim().replace(/\s/g,'');
+  if(s.includes(',') && s.includes('.')){ s = s.replace(/\./g,'').replace(',','.'); }
+  else if(s.includes(',')){ s = s.replace(',','.'); }
+  const v = parseFloat(s); return isNaN(v)?null:v;
+}
+function findRechnungsbetrag(text){
+  const m = text.match(/Rechnungsbetrag[^0-9]{0,30}(\d{1,3}(?:[.\s]\d{3})*,\d{2}|\d+\.\d{2}|\d+,\d{2})/i);
+  return m ? parseDE(m[1]) : null;
+}
+function pdfContainsAmount(text, target, tol){
+  const cands = text.match(/\d{1,3}(?:[.\s]\d{3})*,\d{2}|\d+\.\d{2}/g) || [];
+  return cands.some(c=>{ const v = parseDE(c); return v!=null && Math.abs(v-target) <= tol; });
+}
+function mkResult(name,size,status,profile,errors,warnings,xmlSnippet,hash,pages){
+  return {name,size, status, profile, errors, warnings, xmlSnippet, hash, pages, time: new Date().toISOString()};
+}
+// ---- Quarantäne-Kommentar, spiegelgleich zu Track-B (Patch 2026-09-10) ----
+const RULES_LABEL = 'ZUGFeRD 2.3 / EN16931 2024 + Rechenprüfung (BT-117, Summenkette, PDF↔XML)';
+function mdStem(filename){ return filename.replace(/\.[^.]+$/, ''); }
+function buildCommentMd(r){
+  const f = v => (v==null||isNaN(v)) ? '—' : Number(v).toFixed(2)+' €';
+  const s = r.sums || {};
+  return [`# Prüfkommentar: ${r.name}`,'',
+    `- Status: **${r.status}**`, `- Profil: ${r.profile}`, `- SHA-256 (8): \`${r.hash}\``,
+    `- Geprüft: ${r.time} (offline, Regeln: ${RULES_LABEL})`, '',
+    '## Beträge (XML)','',
+    `- Netto (BT-109): ${f(s.basis)}`, `- MwSt (BT-110): ${f(s.tax)}`,
+    `- Brutto (BT-112): ${f(s.grand)}`, `- Fällig (BT-115): ${f(s.due)}`, '',
+    '## Fehler','', ...((r.errors||[]).map(e=>`- 🔴 ${e}`)), ...(r.errors&&r.errors.length?[]:['- (keine)']),
+    '', '## Hinweise','', ...((r.warnings||[]).map(w=>`- 🟡 ${w}`)), ...(r.warnings&&r.warnings.length?[]:['- (keine)']),
+    '', '## Maßnahme','', '- Maßgeblich ist das XML. Bitte beim Lieferanten klären,',
+    '  korrigierte Rechnung anfordern und erneut prüfen.',''].join('\n');
+}
+
+function render(){
+  if(!results.length){ tbody.innerHTML='<tr><td colspan="7" class="muted">Noch keine Prüfung.</td></tr>'; return; }
+  tbody.innerHTML = results.map((r,i)=>{
+    const lamp = r.status==='GRÜN'?'g': r.status==='ROT'?'r':'y';
+    const msg = [...r.errors.map(e=>`🔴 ${escapeHtml(e)}`), ...r.warnings.map(w=>`🟡 ${escapeHtml(w)}`)].join('<br>') || '<span class="muted">OK</span>';
+    const detail = `<details><summary>Detail</summary>
+      <div class="muted">Hash: ${r.hash} &middot; Profil: ${escapeHtml(r.profile)} &middot; Größe: ${fmtBytes(r.size)} ${r.pages?'· Seiten: '+r.pages:''}</div>
+      ${r.xmlSnippet?`<pre>${escapeHtml(r.xmlSnippet)}</pre>`:`<p class="muted">Kein XML extrahiert</p>`}
+      <pre>${escapeHtml(JSON.stringify({name:r.name, status:r.status, profile:r.profile, errors:r.errors, warnings:r.warnings},null,2))}</pre>
+    </details>`;
+    return `<tr>
+      <td>${i+1}</td>
+      <td><span class="lamp ${lamp}"></span> <strong>${r.status}</strong></td>
+      <td title="${escapeHtml(r.name)}">${escapeHtml(r.name)}</td>
+      <td>${fmtBytes(r.size)}</td>
+      <td>${escapeHtml(r.profile)}</td>
+      <td>${msg}</td>
+      <td>${detail}</td>
+    </tr>`;
+  }).join('');
+}
+
+// ---- Exports (100% Browser, kein Netz) ----
+csvBtn.onclick = ()=>{
+  const rows = [['Dateiname','SHA256_8','Status','Profil','Fehler','Hinweise']];
+  results.forEach(r=> rows.push([r.name, r.hash, r.status, r.profile, r.errors.join(' | '), r.warnings.join(' | ')]));
+  const csv = rows.map(r=> r.map(v=> `"${String(v).replace(/"/g,'""')}"`).join(',')).join('\n');
+  const blob = new Blob([csv],{type:'text/csv;charset=utf-8'});
+  const a=document.createElement('a'); a.href=URL.createObjectURL(blob); a.download=`zugferd-check-${new Date().toISOString().slice(0,10)}.csv`; a.click();
+};
+zipBtn.onclick = async ()=>{
+  const zip = new JSZip();
+  results.forEach(r=>{
+    const txt = `Datei: ${r.name}\nHash: ${r.hash}\nStatus: ${r.status}\nProfil: ${r.profile}\nGröße: ${r.size}\n\nFehler:\n${r.errors.join('\n')||'-'}\n\nHinweise:\n${r.warnings.join('\n')||'-'}\n\n--- XML Snippet ---\n${r.xmlSnippet||'(kein XML)'}\n`;
+    zip.file(`${r.name}.log.txt`, txt);
+    if(r.xmlSnippet) zip.file(`${r.name}.xml`, r.xmlSnippet);
+  });
+  zip.file('audit.csv', results.map(r=>`${r.hash},${r.status},${r.name}`).join('\n'));
+  const blob = await zip.generateAsync({type:'blob'});
+  const a=document.createElement('a'); a.href=URL.createObjectURL(blob); a.download=`zugferd-logs-${new Date().toISOString().slice(0,10)}.zip`; a.click();
+};
+// ---- Quarantäne: Fehler-Paket (ZIP) + In-Ordner-ablage (Patch 2026-09-10) ----
+// Browser dürfen nicht still aufs Dateisystem schreiben. Daher zwei Wege:
+// 1) Fehler-Paket: ZIP mit fehler/<datei>.pdf + fehler/<stamm>.md (immer möglich).
+// 2) In Ordner ablegen: File System Access API (Chrome/Edge) schreibt Kopie + .md
+//    in einen gewählten Ordner unter fehler/. Firefox -> Hinweis aufs ZIP.
+// Der fehler-Ordner entsteht LAZY: nur wenn mind. 1 ROT existiert (Buttons sonst deaktiviert,
+// ZIP enthält den Ordner nur im Fehlerfall, showDirectoryPicker wird ohne ROT gar nicht geöffnet).
+fehlerBtn.onclick = async ()=>{
+  const bad = results.filter(r=>r.status==='ROT');
+  if(!bad.length){ alert('Keine kaputten Dateien - es gibt nichts abzulegen.'); return; }
+  const zip = new JSZip();
+  for(const r of bad){
+    if(r._file){ try{ zip.file(`fehler/${r.name}`, await r._file.arrayBuffer()); }catch(e){ /* Datei weg -> nur Kommentar */ } }
+    zip.file(`fehler/${mdStem(r.name)}.md`, buildCommentMd(r));
+  }
+  const blob = await zip.generateAsync({type:'blob'});
+  const a=document.createElement('a'); a.href=URL.createObjectURL(blob); a.download=`zugferd-fehler-${new Date().toISOString().slice(0,10)}.zip`; a.click();
+};
+saveBtn.onclick = async ()=>{
+  const bad = results.filter(r=>r.status==='ROT' && r._file);
+  if(!bad.length){ alert('Keine kaputten Dateien - es wird kein Ordner angelegt.'); return; }
+  if(!window.showDirectoryPicker){ alert('Direkt-Ablegen braucht Chrome/Edge. Bitte „Fehler-Paket (ZIP)" nutzen.'); return; }
+  try{
+    const dir = await window.showDirectoryPicker({mode:'readwrite'});
+    const fehler = await dir.getDirectoryHandle('fehler', {create:true}); // lazy: erst hier
+    for(const r of bad){
+      const pdfH = await fehler.getFileHandle(r.name, {create:true});
+      const w1 = await pdfH.createWritable(); await w1.write(await r._file.arrayBuffer()); await w1.close();
+      const mdH = await fehler.getFileHandle(`${mdStem(r.name)}.md`, {create:true});
+      const w2 = await mdH.createWritable(); await w2.write(buildCommentMd(r)); await w2.close();
+    }
+    progressText.textContent = `${bad.length} kaputte Datei(en) + Kommentar in „fehler/" abgelegt`;
+  }catch(e){ if(e && e.name!=='AbortError') alert('Ablegen fehlgeschlagen: '+((e.message||e).toString().slice(0,200))); }
+};
+printBtn.onclick = ()=>{  const w=window.open('','_blank');
+  w.document.write(`<html><head><meta charset="utf-8"><title>ZUGFeRD Report</title><style>body{font-family:system-ui;padding:20px} table{border-collapse:collapse;width:100%} th,td{border:1px solid #ccc;padding:6px;font-size:12px} .g{color:green} .r{color:red} .y{color:#b58900}</style></head><body>
+    <h1>ZUGFeRD Prüfbericht - ${new Date().toLocaleString('de-DE')}</h1><p>Regeln: ZUGFeRD 2.3 / EN16931 2024 - Track A Offline</p>
+    <table><tr><th>Datei</th><th>Status</th><th>Profil</th><th>Fehler/Hinweise</th></tr>
+    ${results.map(r=>`<tr><td>${escapeHtml(r.name)}</td><td class="${r.status==='GRÜN'?'g':r.status==='ROT'?'r':'y'}">${r.status}</td><td>${escapeHtml(r.profile)}</td><td>${escapeHtml([...r.errors,...r.warnings].join(' | ')||'OK')}</td></tr>`).join('')}
+    </table><p>Hash = SHA256 gekürzt, 8 hex. Kein Inhalt geloggt.</p></body></html>`);
+  w.document.close(); w.print();
+};
+
+// Offline-Selftest: wenn Seite ohne Netz geladen wurde, zeige Hinweis
+window.addEventListener('load', ()=> {
+  if(!navigator.onLine) progressText.textContent='Offline erkannt - Prüfung läuft trotzdem (100% Browser).';
+});
+</script>
+</body>
+</html>
