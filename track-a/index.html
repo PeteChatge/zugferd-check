@@ -36,9 +36,9 @@
   footer{max-width:1200px;margin:0 auto;padding:10px 16px 30px;color:#64748b;font-size:12px}
   code{background:#f1f5f9;padding:1px 5px;border-radius:4px}
 </style>
-<!-- Offline-Hinweis: Für finalen Offline-Betrieb pdf.js + jszip inline vendorn (siehe vendor/README). Prototype nutzt CDN, funktioniert danach 100% offline wenn vendor gebundled. -->
-<script src="https://cdn.jsdelivr.net/npm/pdfjs-dist@4.6.82/build/pdf.min.mjs" type="module"></script>
-<script src="https://cdn.jsdelivr.net/npm/jszip@3.10.1/dist/jszip.min.js"></script>
+<!-- Offline Build: nutzt ./vendor/ relativ - 100% offline via file:// + http://localhost (kein CDN) -->
+<script src="./vendor/pdf.min.mjs" type="module"></script>
+<script src="./vendor/jszip.min.js"></script>
 </head>
 <body>
 <header>
@@ -105,8 +105,8 @@
 </footer>
 
 <script type="module">
-import * as pdfjsLib from "https://cdn.jsdelivr.net/npm/pdfjs-dist@4.6.82/build/pdf.min.mjs";
-pdfjsLib.GlobalWorkerOptions.workerSrc = "https://cdn.jsdelivr.net/npm/pdfjs-dist@4.6.82/build/pdf.worker.min.mjs";
+import * as pdfjsLib from "./vendor/pdf.min.mjs";
+pdfjsLib.GlobalWorkerOptions.workerSrc = "./vendor/pdf.worker.min.mjs";
 
 const $ = id => document.getElementById(id);
 const drop = $('drop'), fileInput=$('fileInput'), folderInput=$('folderInput');
